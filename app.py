@@ -1,6 +1,6 @@
 import os
 import logging
-import asyncio
+import threading
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
@@ -15,7 +15,7 @@ if not TOKEN:
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# ====== دالة التحميل ======
+# ====== دوال التحميل ======
 async def download_video(url, format_type):
     ydl_opts = {
         'outtmpl': f'{DOWNLOAD_DIR}/%(title)s.%(ext)s',
@@ -91,13 +91,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await query.edit_message_text(f"❌ فشل التحميل: {title}")
 
-# ====== إعداد التطبيق ======
+# ====== إعداد البوت ======
 app_bot = Application.builder().token(TOKEN).build()
 app_bot.add_handler(CommandHandler("start", start))
 app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
 app_bot.add_handler(CallbackQueryHandler(button_handler))
 
-# ====== Flask ======
+# ====== Flask (في خيط منفصل) ======
 flask_app = Flask(__name__)
 
 @flask_app.route('/')
@@ -108,16 +108,15 @@ def home():
 def health():
     return "OK", 200
 
-# ====== تشغيل البوت ======
-def run_bot():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    app_bot.run_polling()
+def run_flask():
+    port = int(os.environ.get("PORT", 5000))
+    flask_app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 
 # ====== التشغيل الرئيسي ======
 if __name__ == "__main__":
-    import threading
-    bot_thread = threading.Thread(target=run_bot, daemon=True)
-    bot_thread.start()
-    port = int(os.environ.get("PORT", 5000))
-    flask_app.run(host="0.0.0.0", port=port)
+    # تشغيل Flask في خيط منفصل
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    # تشغيل البوت في الخيط الرئيسي (لتجنب مشكلة الإشارات)
+    print("🤖 Bot is starting with polling...")
+    app_bot.run_polling()
