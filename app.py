@@ -1,6 +1,5 @@
 import os
 import logging
-import threading
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
@@ -15,35 +14,16 @@ if not TOKEN:
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# ====== دوال التحميل ======
 async def download_video(url, format_type):
-    ydl_opts = {
-        'outtmpl': f'{DOWNLOAD_DIR}/%(title)s.%(ext)s',
-    }
+    ydl_opts = {'outtmpl': f'{DOWNLOAD_DIR}/%(title)s.%(ext)s'}
     if format_type == 'audio':
-        ydl_opts.update({
-            'format': 'bestaudio/best',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-        })
+        ydl_opts.update({'format': 'bestaudio/best', 'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}]})
     elif format_type == 'video_1080':
-        ydl_opts.update({
-            'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]',
-            'merge_output_format': 'mp4',
-        })
+        ydl_opts.update({'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]', 'merge_output_format': 'mp4'})
     elif format_type == 'video_720':
-        ydl_opts.update({
-            'format': 'bestvideo[height<=720]+bestaudio/best[height<=720]',
-            'merge_output_format': 'mp4',
-        })
+        ydl_opts.update({'format': 'bestvideo[height<=720]+bestaudio/best[height<=720]', 'merge_output_format': 'mp4'})
     else:
-        ydl_opts.update({
-            'format': 'bestvideo[height<=480]+bestaudio/best[height<=480]',
-            'merge_output_format': 'mp4',
-        })
+        ydl_opts.update({'format': 'bestvideo[height<=480]+bestaudio/best[height<=480]', 'merge_output_format': 'mp4'})
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
@@ -54,7 +34,6 @@ async def download_video(url, format_type):
     except Exception as e:
         return None, str(e)
 
-# ====== دوال البوت ======
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 أرسل رابط يوتيوب، تيك توك، إنستغرام أو تويتر، وسأحمله لك!\n📌 اختر الجودة بعد إرسال الرابط.")
 
@@ -91,32 +70,23 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await query.edit_message_text(f"❌ فشل التحميل: {title}")
 
-# ====== إعداد البوت ======
 app_bot = Application.builder().token(TOKEN).build()
 app_bot.add_handler(CommandHandler("start", start))
 app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
 app_bot.add_handler(CallbackQueryHandler(button_handler))
 
-# ====== Flask (في خيط منفصل) ======
 flask_app = Flask(__name__)
 
 @flask_app.route('/')
 def home():
     return "🤖 Bot is running!"
 
-@flask_app.route('/health')
-def health():
-    return "OK", 200
-
-def run_flask():
-    port = int(os.environ.get("PORT", 5000))
-    flask_app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
-
-# ====== التشغيل الرئيسي ======
 if __name__ == "__main__":
-    # تشغيل Flask في خيط منفصل
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
-    # تشغيل البوت في الخيط الرئيسي (لتجنب مشكلة الإشارات)
-    print("🤖 Bot is starting with polling...")
-    app_bot.run_polling()
+    # تشغيل البوت في الخلفية باستخدام Polling (بدون خيوط إضافية)
+    import threading
+    def run_bot():
+        app_bot.run_polling()
+    bot_thread = threading.Thread(target=run_bot, daemon=True)
+    bot_thread.start()
+    port = int(os.environ.get("PORT", 5000))
+    flask_app.run(host="0.0.0.0", port=port)
