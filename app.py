@@ -1,30 +1,25 @@
 import os
-import threading
+import logging
 import asyncio
-import nest_asyncio
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 import yt_dlp
 
-# حل مشكلة الحلقات في Flask
-nest_asyncio.apply()
+logging.basicConfig(level=logging.INFO)
 
-# ====== قراءة التوكن من متغيرات البيئة ======
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 if not TOKEN:
-    raise ValueError("TELEGRAM_TOKEN not set in environment variables")
+    raise ValueError("TELEGRAM_TOKEN not set!")
 
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# ====== دالة التحميل مع خيارات الجودة ======
+# ====== دالة التحميل ======
 async def download_video(url, format_type):
     ydl_opts = {
         'outtmpl': f'{DOWNLOAD_DIR}/%(title)s.%(ext)s',
-        'progress_hooks': [lambda d: print(d['status'])],
     }
-    
     if format_type == 'audio':
         ydl_opts.update({
             'format': 'bestaudio/best',
@@ -44,12 +39,11 @@ async def download_video(url, format_type):
             'format': 'bestvideo[height<=720]+bestaudio/best[height<=720]',
             'merge_output_format': 'mp4',
         })
-    else:  # video_480
+    else:
         ydl_opts.update({
             'format': 'bestvideo[height<=480]+bestaudio/best[height<=480]',
             'merge_output_format': 'mp4',
         })
-    
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
@@ -60,12 +54,9 @@ async def download_video(url, format_type):
     except Exception as e:
         return None, str(e)
 
-# ====== أوامر البوت ======
+# ====== دوال البوت ======
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "👋 أرسل رابط يوتيوب، تيك توك، إنستغرام أو تويتر، وسأحمله لك!\n\n"
-        "📌 اختر الجودة بعد إرسال الرابط."
-    )
+    await update.message.reply_text("👋 أرسل رابط يوتيوب، تيك توك، إنستغرام أو تويتر، وسأحمله لك!\n📌 اختر الجودة بعد إرسال الرابط.")
 
 async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text
@@ -79,22 +70,18 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         await update.message.reply_text("✅ اختر الجودة:", reply_markup=InlineKeyboardMarkup(keyboard))
     else:
-        await update.message.reply_text("⚠️ الرجاء إرسال رابط مدعوم (يوتيوب، تيك توك، إلخ).")
+        await update.message.reply_text("⚠️ الرجاء إرسال رابط مدعوم.")
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
     url = context.user_data.get('url')
     if not url:
-        await query.edit_message_text("❌ لم يتم العثور على رابط، أرسل الرابط أولاً.")
+        await query.edit_message_text("❌ لم يتم العثور على رابط.")
         return
-    
     format_type = query.data
-    await query.edit_message_text(f"⏳ جاري التحميل... (قد يستغرق دقيقة)")
-    
+    await query.edit_message_text(f"⏳ جاري التحميل...")
     filename, title = await download_video(url, format_type)
-    
     if filename and os.path.exists(filename):
         await query.edit_message_text(f"📤 جاري رفع: {title}")
         with open(filename, 'rb') as f:
@@ -104,16 +91,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await query.edit_message_text(f"❌ فشل التحميل: {title}")
 
-# ====== تشغيل البوت في Thread منفصل ======
-def run_bot():
-    app = Application.builder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
-    app.add_handler(CallbackQueryHandler(button_handler))
-    print("🤖 البوت يعمل...")
-    app.run_polling()
+# ====== إعداد التطبيق ======
+app_bot = Application.builder().token(TOKEN).build()
+app_bot.add_handler(CommandHandler("start", start))
+app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
+app_bot.add_handler(CallbackQueryHandler(button_handler))
 
-# ====== Flask (لـ Render) ======
+# ====== Flask ======
 flask_app = Flask(__name__)
 
 @flask_app.route('/')
@@ -124,12 +108,16 @@ def home():
 def health():
     return "OK", 200
 
+# ====== تشغيل البوت ======
+def run_bot():
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    app_bot.run_polling()
+
 # ====== التشغيل الرئيسي ======
 if __name__ == "__main__":
-    # شغل البوت في خلفية
+    import threading
     bot_thread = threading.Thread(target=run_bot, daemon=True)
     bot_thread.start()
-    
-    # شغل Flask لتلبية منفذ Render
     port = int(os.environ.get("PORT", 5000))
     flask_app.run(host="0.0.0.0", port=port)
